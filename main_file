@@ -1,0 +1,107 @@
+import requests             
+from bs4 import BeautifulSoup 
+import csv                  
+#import webbrowser
+#import io
+import re
+import time
+import numpy as np
+import pandas as pd
+import selenium
+from selenium.webdriver import Chrome
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.wait import WebDriverWait
+print('Done')
+
+soup = BeautifulSoup(r, 'html.parser')
+
+# HOTELLERIN LINKLERINI SEARCH PAGE-DEN YIGIRIQ LISTE VE FAYLA, her defe ehtiyac yoxdur.
+start_url='https://www.tripadvisor.com/Search?q=azerbaijan&ssrc=h' #starts in search azerbaijan page
+browser=Chrome(executable_path='chromedriver')
+browser.get(start_url)
+
+hotel_list=[]
+while True:
+    time.sleep(3)
+    hotels=browser.find_elements_by_css_selector('div.result-title')
+    for h in hotels:
+        hotel_name=h.text
+        #link construction edirik formata uygun olaraq:
+        hotel_link='tripadvisor.com'+h.get_attribute('onclick').split(',')[3].strip().replace('\'','') 
+        hotel_list.append([h.text,hotel_link]) #bunu yoxlamamasam isleyir ya yox.
+    try:    
+        next_page=browser.find_element_by_css_selector('a.ui_button.nav.next.primary').click() #class adi bir nece sozden ibaretdirse noqte ile yazmaq lazimdi
+    except:
+        break
+print(len(hotel_list))
+dataset=pd.DataFrame(hotel_list) #DataFrame case-sensitivedir.
+dataset.to_csv("triplinks.csv",columns='Linkler')
+
+for url in hotel_list:
+    browser.get(url)
+    
+file=open('triplinks short.csv')
+read_file=csv.reader(file)
+hotel_list=list(read_file)[1:]
+hotel_list[0:3]
+
+file=open('triplinks.csv')
+read_file=csv.reader(file)
+hotel_list=list(read_file)[780:] # csv-e yigdigimiz linkleri list kimi getiriirik. 
+#url='https://www.tripadvisor.com/Hotel_Review-g293934-d3500003-Reviews-Fairmont_Baku_Flame_Towers-Baku_Absheron_Region.html'
+'''browser=Chrome(executable_path='chromedriver')
+browser.get(url)'''#bu seleniumdu requestle calisacam cekek.
+# create session to keep all cookies (etc.) between requests and setup max tries to at least 5 not to get connection interruption error because default attempt is 1 in requests library:
+MAX_RETRIES = 5
+session = requests.Session()
+adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES) # https://bit.ly/2R6aWwH-stackwoverflow
+session.mount('https://', adapter)
+session.mount('http://', adapter)
+
+session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0',
+    }) #susan li-nin scriptinden parca.
+review_list=[] 
+print("Start time: ",time.strftime("%H:%M:%S", time.gmtime())) #start vaxti,
+for url in hotel_list:
+    url=url[1]
+    print(url[70:140]) #link uzun olmasin deye bir parcasin print edirik.
+    r=session.get(url)
+    soup = BeautifulSoup(r.text, 'html.parser')
+    offset=0
+#results=soup.find_all('div',class_='reviewSelector')
+    pagination=0
+    next_button=soup.find('a',class_='ui_button nav next primary')
+    #print(next_button)
+    #print('disabled' in next_button['class']) #next buttonu deqiq tapmaq ucun idi.
+    while (next_button!=None): #not : #True:# offset<25: #next button <a > tag-i itir son page-e catanda ve None deyeri alir.
+        '''#reviews=browser.find_elements_by_css_selector('.cPQsENeY')
+        for r in reviews:
+            review_list.append(r.text)'''
+        results=soup.find_all('div', attrs={'data-reviewid': True}) #bu owner responsu div-ini de daxil edir
+        #results=soup.find_all('div', '_2f_ruteS _1bona3Pu _2uD5bLZZ')
+        for r in results: #son 2 ilin review-larin aliriq.
+            if ('2018' or '2019') in r.find('div', class_='hotels-community-tab-reviews-ReviewsTabContent__footer--2FHIK').get_text():#get_text bs4 metodudur.
+                review_list.append([r.find('div',class_='_2f_ruteS _1bona3Pu _2uD5bLZZ').get_text()+'-----*****-----',
+                                r.span['class'][1].replace('bubble_',''),url])#rating-i gotururuk.
+            #r.span['class'][1].replace('bubble_','')
+        offset+=5    
+        url=url.replace('Reviews', 'Reviews-or{}').format(offset) #susan-li den setir, page link construct ucun.
+        try:
+            r=session.get(url, timeout=8) 
+        except requests.exceptions.ReadTimeout:
+            print('Timeout exception occured')
+            print("Error time: ",time.strftime("%H:%M:%S", time.gmtime()))
+        soup = BeautifulSoup(r.text, 'html.parser')
+        next_button=soup.find('a',class_='ui_button nav next primary')
+        pagination+=1
+        #print('Done: ', pagination)
+
+print(len(review_list))
+print(review_list[:15])
+#print(results)
+dataset=pd.DataFrame(review_list) #DataFrame case-sensitivedir.
+dataset.to_csv("tripcomments.csv")
+print("End time: ",time.strftime("%H:%M:%S", time.gmtime())) #start vaxti,
